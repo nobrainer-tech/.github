@@ -1,0 +1,42 @@
+name: Set up Python (Mac mini pool aware)
+description: >-
+  Drop-in for actions/setup-python. On GitHub-hosted runners it runs
+  actions/setup-python unchanged. On the self-hosted Mac mini pool it puts the
+  Python seeded in the job's own tool cache clone on PATH: actions/setup-python
+  cannot install there, because on macOS it hardcodes /Users/runner/hostedtoolcache
+  and runs `sudo installer`.
+inputs:
+  python-version:
+    description: Version prefix, for example 3.14 or 3.12.12.
+    required: true
+outputs:
+  python-version:
+    description: The full Python version that is now on PATH.
+    value: ${{ steps.hosted.outputs.python-version || steps.pool.outputs.python-version }}
+runs:
+  using: composite
+  steps:
+    - id: hosted
+      if: runner.environment == 'github-hosted'
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      with:
+        python-version: ${{ inputs.python-version }}
+    - id: pool
+      if: runner.environment != 'github-hosted'
+      shell: bash
+      env:
+        WANT: ${{ inputs.python-version }}
+      run: |
+        set -euo pipefail
+        base="$RUNNER_TOOL_CACHE/Python"
+        pattern="^${WANT//./\\.}(\\.|$)"
+        full="$(ls "$base" 2>/dev/null | grep -E "$pattern" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1 || true)"
+        if [ -z "$full" ] || [ ! -f "$base/$full/arm64.complete" ]; then
+          echo "::error::Python $WANT is not seeded on this runner. Run seed-toolcache.sh (wiki: Knowledge/Automation/github-actions-self-hosted.md)."
+          exit 1
+        fi
+        root="$base/$full/arm64"
+        echo "$root/bin" >> "$GITHUB_PATH"
+        echo "pythonLocation=$root" >> "$GITHUB_ENV"
+        echo "python-version=$full" >> "$GITHUB_OUTPUT"
+        "$root/bin/python" --version
